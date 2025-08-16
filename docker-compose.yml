@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  homepage-scraper:
+    build: .
+    container_name: homepage-scraper
+    image: homepage-scraper:latest
+    
+    # Environment variables for configuration
+    environment:
+      - CONCURRENT_REQUESTS=16
+      - CONCURRENT_REQUESTS_PER_DOMAIN=8
+      - DOWNLOAD_DELAY=1
+      - MAX_ARTICLES=20
+      - SUMMARY_ENABLED=true
+      - SUMMARY_MAX_LENGTH=160
+      - SUMMARY_MIN_LENGTH=60
+    
+    # Volume mounts for data persistence
+    volumes:
+      - ./results:/app/results
+      - ./output:/app/output
+      - ./summary:/app/summary
+      - ./logs:/app/logs
+    
+    # Working directory
+    working_dir: /app
+    
+    # Command to run (can be overridden)
+    command: ["python", "run.py", "--help"]
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import scraper; print('Scraper is healthy')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Network configuration
+    networks:
+      - scraper-network
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: Redis for caching (uncomment if needed)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: scraper-redis
+  #   restart: unless-stopped
+  #   networks:
+  #     - scraper-network
+  #   volumes:
+  #     - redis-data:/data
+
+# Networks
+networks:
+  scraper-network:
+    driver: bridge
+
+# Volumes (uncomment if using Redis)
+# volumes:
+#   redis-data:

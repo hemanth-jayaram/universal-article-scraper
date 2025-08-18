@@ -56,10 +56,12 @@ class ScraperGUI:
         
         # Progress variables
         self.scrape_progress = tk.DoubleVar()
+        self.filter_progress = tk.DoubleVar()
         self.summary_progress = tk.DoubleVar()
         
         # State variables
         self.scraping = False
+        self.filtering = False
         self.summarizing = False
         
     def setup_styles(self):
@@ -118,6 +120,14 @@ class ScraperGUI:
             style="Action.TButton"
         )
         
+        self.filter_btn = ttk.Button(
+            self.actions_frame,
+            text="🔍 Filter Articles",
+            command=self.start_filtering,
+            style="Action.TButton",
+            state='disabled'
+        )
+        
         self.summarize_btn = ttk.Button(
             self.actions_frame,
             text="📝 Summarize Articles",
@@ -136,6 +146,13 @@ class ScraperGUI:
             style="Danger.TButton"
         )
         
+        self.clear_filter_btn = ttk.Button(
+            self.utils_frame,
+            text="🗑️ Clear Filter",
+            command=self.clear_filter,
+            style="Danger.TButton"
+        )
+        
         self.clear_summary_btn = ttk.Button(
             self.utils_frame,
             text="🗑️ Clear Summary",
@@ -147,6 +164,13 @@ class ScraperGUI:
             self.utils_frame,
             text="📁 Open Results",
             command=self.open_results_folder,
+            style="Modern.TButton"
+        )
+        
+        self.open_filter_btn = ttk.Button(
+            self.utils_frame,
+            text="📁 Open Filter",
+            command=self.open_filter_folder,
             style="Modern.TButton"
         )
         
@@ -164,6 +188,15 @@ class ScraperGUI:
         self.scrape_progress_bar = ttk.Progressbar(
             self.progress_frame,
             variable=self.scrape_progress,
+            maximum=100,
+            length=300,
+            mode='determinate'
+        )
+        
+        self.filter_progress_label = ttk.Label(self.progress_frame, text="Filter Progress:")
+        self.filter_progress_bar = ttk.Progressbar(
+            self.progress_frame,
+            variable=self.filter_progress,
             maximum=100,
             length=300,
             mode='determinate'
@@ -213,16 +246,19 @@ class ScraperGUI:
         # Actions section
         self.actions_frame.grid(row=2, column=0, sticky="ew", pady=(0, 15), padx=(0, 10))
         
-        self.scrape_btn.grid(row=0, column=0, padx=(0, 15))
-        self.summarize_btn.grid(row=0, column=1)
+        self.scrape_btn.grid(row=0, column=0, padx=(0, 10))
+        self.filter_btn.grid(row=0, column=1, padx=(0, 10))
+        self.summarize_btn.grid(row=0, column=2)
         
         # Utils section
         self.utils_frame.grid(row=2, column=1, sticky="ew", pady=(0, 15))
         
-        self.clear_results_btn.grid(row=0, column=0, padx=(0, 10))
-        self.clear_summary_btn.grid(row=0, column=1, padx=(0, 10))
-        self.open_results_btn.grid(row=1, column=0, padx=(0, 10), pady=(10, 0))
-        self.open_summary_btn.grid(row=1, column=1, padx=(0, 10), pady=(10, 0))
+        self.clear_results_btn.grid(row=0, column=0, padx=(0, 5))
+        self.clear_filter_btn.grid(row=0, column=1, padx=(0, 5))
+        self.clear_summary_btn.grid(row=0, column=2, padx=(0, 5))
+        self.open_results_btn.grid(row=1, column=0, padx=(0, 5), pady=(10, 0))
+        self.open_filter_btn.grid(row=1, column=1, padx=(0, 5), pady=(10, 0))
+        self.open_summary_btn.grid(row=1, column=2, padx=(0, 5), pady=(10, 0))
         
         # Progress section
         self.progress_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(0, 15))
@@ -231,8 +267,11 @@ class ScraperGUI:
         self.scrape_progress_label.grid(row=0, column=0, sticky="w", pady=(0, 5))
         self.scrape_progress_bar.grid(row=0, column=1, sticky="ew", pady=(0, 5), padx=(10, 0))
         
-        self.summary_progress_label.grid(row=1, column=0, sticky="w", pady=(5, 0))
-        self.summary_progress_bar.grid(row=1, column=1, sticky="ew", pady=(5, 0), padx=(10, 0))
+        self.filter_progress_label.grid(row=1, column=0, sticky="w", pady=(5, 0))
+        self.filter_progress_bar.grid(row=1, column=1, sticky="ew", pady=(5, 0), padx=(10, 0))
+        
+        self.summary_progress_label.grid(row=2, column=0, sticky="w", pady=(5, 0))
+        self.summary_progress_bar.grid(row=2, column=1, sticky="ew", pady=(5, 0), padx=(10, 0))
         
         # Output section
         self.output_frame.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(0, 0))
@@ -290,6 +329,7 @@ class ScraperGUI:
             
         self.scraping = True
         self.scrape_btn.config(state='disabled')
+        self.filter_btn.config(state='disabled')
         self.summarize_btn.config(state='disabled')
         self.scrape_progress.set(0)
         
@@ -399,8 +439,8 @@ class ScraperGUI:
             
             if process.returncode == 0:
                 self.output_queue.put("✅ Scraping completed successfully!")
-                self.update_status("Scraping completed - Ready to summarize")
-                self.summarize_btn.config(state='normal')
+                self.update_status("Scraping completed - Ready to filter")
+                self.filter_btn.config(state='normal')
             else:
                 self.output_queue.put("❌ Scraping failed!")
                 self.update_status("Scraping failed")
@@ -412,14 +452,113 @@ class ScraperGUI:
         finally:
             self.scraping = False
             self.scrape_btn.config(state='normal')
+            if Path("results").exists():
+                self.filter_btn.config(state='normal')
             
+    def start_filtering(self):
+        """Start filtering in background thread."""
+        if self.filtering:
+            return
+            
+        if not Path("results").exists():
+            messagebox.showwarning("Warning", "No results folder found. Please scrape articles first.")
+            return
+            
+        self.filtering = True
+        self.filter_btn.config(state='disabled')
+        self.summarize_btn.config(state='disabled')
+        self.filter_progress.set(0)
+        
+        self.update_status("Starting article filtering...")
+        self.add_output("🔍 Starting article filtering...")
+        self.add_output("-" * 50)
+        
+        # Start filtering thread
+        thread = threading.Thread(target=self.run_filter, daemon=True)
+        thread.start()
+        
+    def run_filter(self):
+        """Run filter script in background."""
+        try:
+            cmd = [sys.executable, "filter_articles.py", "--input", "results", "--output", "filter"]
+            
+            self.output_queue.put(f"💻 Running filter: {' '.join(cmd[1:])}")
+            
+            # Run process and capture output with unbuffered mode
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                universal_newlines=True,
+                bufsize=1,  # Line buffered
+                cwd=os.getcwd(),
+                env=dict(os.environ, PYTHONUNBUFFERED='1')
+            )
+            
+            articles_processed = 0
+            total_articles = 0
+            
+            # Monitor output
+            for line in iter(process.stdout.readline, ''):
+                if line.strip():
+                    self.output_queue.put(line.strip())
+                    
+                    # Update progress based on output
+                    if "Found" in line and "JSON files" in line:
+                        match = re.search(r'Found (\d+) JSON files', line)
+                        if match:
+                            total_articles = int(match.group(1))
+                            self.filter_progress.set(10)
+                            
+                    elif "Articles identified:" in line:
+                        match = re.search(r'Articles identified: (\d+)', line)
+                        if match:
+                            articles_identified = int(match.group(1))
+                            self.filter_progress.set(50)
+                            self.update_status(f"Identified {articles_identified} articles for filtering")
+                            
+                    elif "✅ Copied:" in line:
+                        articles_processed += 1
+                        if total_articles > 0:
+                            progress = 50 + min((articles_processed / total_articles) * 45, 45)
+                            self.filter_progress.set(progress)
+                            self.update_status(f"Copying articles... ({articles_processed})")
+                            
+                    elif "Articles copied:" in line:
+                        match = re.search(r'Articles copied: (\d+)', line)
+                        if match:
+                            final_count = int(match.group(1))
+                            self.filter_progress.set(100)
+                            self.update_status(f"Filtering completed: {final_count} articles")
+            
+            process.wait()
+            
+            if process.returncode == 0:
+                self.output_queue.put("✅ Filtering completed successfully!")
+                self.update_status("Filtering completed - Ready to summarize")
+                self.summarize_btn.config(state='normal')
+            else:
+                self.output_queue.put("❌ Filtering failed!")
+                self.update_status("Filtering failed")
+                
+        except Exception as e:
+            self.output_queue.put(f"❌ Error: {str(e)}")
+            self.update_status("Filtering error")
+            
+        finally:
+            self.filtering = False
+            self.filter_btn.config(state='normal')
+    
     def start_summarizing(self):
         """Start summarization in background thread."""
         if self.summarizing:
             return
             
-        if not Path("results").exists():
-            messagebox.showwarning("Warning", "No results folder found. Please scrape articles first.")
+        if not Path("filter").exists():
+            messagebox.showwarning("Warning", "No filter folder found. Please filter articles first.")
             return
             
         self.summarizing = True
@@ -437,7 +576,7 @@ class ScraperGUI:
     def run_summarizer(self):
         """Run summarizer script in background."""
         try:
-            cmd = [sys.executable, "summarize_articles_simple_fast.py", "--batch-size", "4"]
+            cmd = [sys.executable, "summarize_articles_simple_fast.py", "--input", "filter", "--batch-size", "4", "--skip-filtering"]
             
             self.output_queue.put(f"💻 Running summarizer: {' '.join(cmd[1:])}")
             
@@ -511,11 +650,30 @@ class ScraperGUI:
                     
                 self.add_output("🗑️ Results folder cleared")
                 self.update_status("Results cleared")
+                self.filter_btn.config(state='disabled')
                 self.summarize_btn.config(state='disabled')
                 self.scrape_progress.set(0)
+                self.filter_progress.set(0)
                 
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to clear results: {str(e)}")
+                
+    def clear_filter(self):
+        """Clear filter folder."""
+        if messagebox.askyesno("Confirm", "Are you sure you want to clear all filtered articles?"):
+            try:
+                filter_path = Path("filter")
+                if filter_path.exists():
+                    shutil.rmtree(filter_path)
+                    filter_path.mkdir()
+                    
+                self.add_output("🗑️ Filter folder cleared")
+                self.update_status("Filter cleared")
+                self.summarize_btn.config(state='disabled')
+                self.filter_progress.set(0)
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to clear filter: {str(e)}")
                 
     def clear_summary(self):
         """Clear summary folder."""
@@ -549,6 +707,23 @@ class ScraperGUI:
                 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open results folder: {str(e)}")
+            
+    def open_filter_folder(self):
+        """Open filter folder in file explorer."""
+        try:
+            filter_path = Path("filter").absolute()
+            if not filter_path.exists():
+                filter_path.mkdir()
+                
+            if sys.platform == "win32":
+                os.startfile(filter_path)
+            elif sys.platform == "darwin":
+                subprocess.run(["open", filter_path])
+            else:
+                subprocess.run(["xdg-open", filter_path])
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open filter folder: {str(e)}")
             
     def open_summary_folder(self):
         """Open summary folder in file explorer."""

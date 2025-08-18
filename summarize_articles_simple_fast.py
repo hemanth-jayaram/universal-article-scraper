@@ -404,6 +404,7 @@ def main():
     parser.add_argument('--batch-size', type=int, default=4, help='Batch size for processing (default: 4)')
     parser.add_argument('--workers', type=int, default=min(4, mp.cpu_count()), help='Number of worker threads (default: 4)')
     parser.add_argument('--no-overwrite', action='store_true', help='Do not overwrite existing summary directory')
+    parser.add_argument('--skip-filtering', action='store_true', help='Skip article filtering (use when input is already filtered)')
     
     args = parser.parse_args()
     
@@ -433,12 +434,16 @@ def main():
         logger.error("No valid JSON files found")
         sys.exit(1)
     
-    # Filter to only actual articles
-    article_files = filter_articles_only(json_files)
-    if not article_files:
-        logger.error("No articles found to summarize after filtering")
-        logger.error("All files were identified as non-articles (category pages, tools, listings, etc.)")
-        sys.exit(1)
+    # Filter to only actual articles (unless skipping filtering)
+    if args.skip_filtering:
+        logger.info("🔄 Skipping filtering step - using all JSON files")
+        article_files = json_files
+    else:
+        article_files = filter_articles_only(json_files)
+        if not article_files:
+            logger.error("No articles found to summarize after filtering")
+            logger.error("All files were identified as non-articles (category pages, tools, listings, etc.)")
+            sys.exit(1)
     
     # Create summary directory
     if summary_dir.exists():

@@ -5,7 +5,7 @@ Generic homepage spider that discovers and scrapes article links.
 import os
 import time
 from urllib.parse import urlparse
-from typing import Generator, Any, Dict, Optional
+from typing import Generator, Any, Dict, Optional, List
 
 import scrapy
 from scrapy import Request
@@ -53,6 +53,10 @@ class HomepageSpider(scrapy.Spider):
         
         # Ensure output directory exists
         ensure_output_dir(self.out_dir)
+        
+        # NEW: Store articles in memory for filtering before saving
+        self.scraped_articles = []
+        self.filtered_articles = []
         
         logger.info(f"Starting scrape of {start_url}")
         logger.info(f"Output directory: {self.out_dir}")
@@ -127,13 +131,9 @@ class HomepageSpider(scrapy.Spider):
             # Ensure URL is set
             article_data['url'] = response.url
             
-            # Save the article
-            success = write_json_per_article(article_data, self.out_dir)
-            if success:
-                self.articles_saved += 1
-                logger.info(f"Saved article: {article_data.get('title', 'Untitled')}")
-            else:
-                logger.error(f"Failed to save article from {response.url}")
+            # NEW: Store article in memory instead of saving immediately
+            self.scraped_articles.append(article_data)
+            logger.info(f"Scraped article: {article_data.get('title', 'Untitled')}")
                 
         except Exception as e:
             logger.error(f"Error processing article {response.url}: {e}")
@@ -147,16 +147,132 @@ class HomepageSpider(scrapy.Spider):
         elapsed_time = time.time() - self.start_time
         
         logger.info("=" * 60)
-        logger.info("SCRAPING COMPLETE")
+        logger.info("SCRAPING COMPLETE - STARTING FILTERING")
         logger.info("=" * 60)
         logger.info(f"Homepage: {self.start_urls[0]}")
         logger.info(f"Total links found: {self.articles_found}")
         logger.info(f"Articles processed: {self.articles_processed}")
-        logger.info(f"Articles saved: {self.articles_saved}")
+        logger.info(f"Articles scraped: {len(self.scraped_articles)}")
         logger.info(f"Output directory: {self.out_dir}")
         logger.info(f"Elapsed time: {elapsed_time:.2f} seconds")
         logger.info(f"Reason: {reason}")
+        
+        # NEW: Filter articles before saving
+        if self.scraped_articles:
+            logger.info("🔍 Starting article filtering...")
+            self.filter_articles()
+            logger.info(f"✅ Filtering complete: {len(self.filtered_articles)} articles passed filter")
+            
+            # Save only filtered articles
+            logger.info("💾 Saving filtered articles...")
+            self.save_filtered_articles()
+            logger.info(f"💾 Saving complete: {self.articles_saved} articles saved")
+        else:
+            logger.warning("⚠️ No articles were scraped successfully")
+        
         logger.info("=" * 60)
+        logger.info("FINAL RESULTS")
+        logger.info("=" * 60)
+        logger.info(f"Articles scraped: {len(self.scraped_articles)}")
+        logger.info(f"Articles filtered: {len(self.filtered_articles)}")
+        logger.info(f"Articles saved: {self.articles_saved}")
+        logger.info(f"Total time: {elapsed_time:.2f} seconds")
+        logger.info("=" * 60)
+    
+    def filter_articles(self) -> None:
+        """Filter scraped articles using the same logic as filter_articles.py."""
+        # First try to import the filtering function
+        is_actual_article = None
+        
+        # Try multiple import paths to ensure compatibility
+        import_attempts = [
+            # Path 1: Direct import (for local execution)
+            lambda: __import__('filter_articles', fromlist=['is_actual_article']).is_actual_article,
+            # Path 2: From project root (for remote execution)
+            lambda: self._import_from_project_root(),
+            # Path 3: From current working directory
+            lambda: self._import_from_cwd(),
+        ]
+        
+        for attempt in import_attempts:
+            try:
+                is_actual_article = attempt()
+                if is_actual_article:
+                    logger.info("✅ Successfully imported filtering function")
+                    break
+            except (ImportError, AttributeError, Exception) as e:
+                logger.debug(f"Import attempt failed: {e}")
+                continue
+        
+        if not is_actual_article:
+            logger.error("❌ Failed to import filter_articles module. Falling back to saving all articles.")
+            # If filtering fails completely, include all articles to be safe
+            self.filtered_articles = self.scraped_articles.copy()
+            return
+        
+        logger.info(f"🔍 Filtering {len(self.scraped_articles)} scraped articles...")
+        
+        for article_data in self.scraped_articles:
+            try:
+                # Use the same filtering logic from filter_articles.py
+                is_article, reason = is_actual_article(article_data)
+                
+                if is_article:
+                    self.filtered_articles.append(article_data)
+                    logger.debug(f"✅ Article passed filter: {article_data.get('title', 'Untitled')}")
+                else:
+                    logger.debug(f"❌ Article filtered out: {article_data.get('title', 'Untitled')} - {reason}")
+                    
+            except Exception as e:
+                logger.error(f"Error filtering article {article_data.get('title', 'Untitled')}: {e}")
+                # If filtering fails, include the article to be safe
+                self.filtered_articles.append(article_data)
+        
+        logger.info(f"🔍 Filtering complete: {len(self.filtered_articles)}/{len(self.scraped_articles)} articles passed filter")
+    
+    def _import_from_project_root(self):
+        """Try to import filter_articles from project root."""
+        import sys
+        import os
+        
+        # Get the project root (3 levels up from this file)
+        current_file = os.path.abspath(__file__)
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
+        
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        
+        from filter_articles import is_actual_article
+        return is_actual_article
+    
+    def _import_from_cwd(self):
+        """Try to import filter_articles from current working directory."""
+        import sys
+        import os
+        
+        cwd = os.getcwd()
+        if cwd not in sys.path:
+            sys.path.insert(0, cwd)
+        
+        from filter_articles import is_actual_article
+        return is_actual_article
+    
+    def save_filtered_articles(self) -> None:
+        """Save only the filtered articles."""
+        logger.info(f"💾 Saving {len(self.filtered_articles)} filtered articles...")
+        
+        for article_data in self.filtered_articles:
+            try:
+                success = write_json_per_article(article_data, self.out_dir)
+                if success:
+                    self.articles_saved += 1
+                    logger.debug(f"💾 Saved: {article_data.get('title', 'Untitled')}")
+                else:
+                    logger.error(f"❌ Failed to save: {article_data.get('title', 'Untitled')}")
+            except Exception as e:
+                logger.error(f"Error saving article {article_data.get('title', 'Untitled')}: {e}")
+        
+        logger.info(f"💾 Saving complete: {self.articles_saved} articles saved successfully")
     
     def _fallback_summary(self, content: str, max_sentences: int = 3) -> str:
         """

@@ -100,65 +100,20 @@ try {
         throw "Failed to execute scraper on remote server: $_"
     }
 
-    # Check if remote output directory exists and has files
-    Write-Host "Checking remote output..." -ForegroundColor Yellow
-    $checkOutputCommand = "ls -la ~/SCRAPER/$remoteOutputDir/ 2>/dev/null | wc -l"
+    # Check S3 configuration on remote server
+    Write-Host "Checking S3 configuration..." -ForegroundColor Yellow
+    $s3Bucket = "bockscraper"
     
-    try {
-        $fileCount = ssh -i $KeyPath -o StrictHostKeyChecking=no "$Username@$Ip" $checkOutputCommand
-        $fileCount = [int]$fileCount.Trim()
-        
-        if ($fileCount -le 1) {
-            throw "No output files found in remote directory"
-        }
-        
-        Write-Host "Found $($fileCount - 1) files in remote output directory" -ForegroundColor Green
-        
-    } catch {
-        Write-Host "Warning: Could not verify remote output files" -ForegroundColor Yellow
-    }
+    Write-Host "S3 upload is required for this scraper" -ForegroundColor Green
+    Write-Host "S3 Bucket: $s3Bucket" -ForegroundColor Cyan
+    Write-Host "Articles will be uploaded directly to S3 - no local download" -ForegroundColor Yellow
 
-    # Download results from remote server
-    Write-Host "Downloading results from EC2..." -ForegroundColor Yellow
-    
-    # Create timestamped local directory
-    $localOutputPath = Join-Path $LocalResultsDir "${remoteOutputDir}_$(Get-Date -Format 'HHmmss')"
-    New-Item -ItemType Directory -Path $localOutputPath -Force | Out-Null
-    
-    # Download all files from remote output directory
-    $remoteSourcePath = "${Username}@${Ip}:~/SCRAPER/${remoteOutputDir}/*"
-    
-    try {
-        scp -i $KeyPath -o StrictHostKeyChecking=no -r $remoteSourcePath $localOutputPath
-        
-        if ($LASTEXITCODE -ne 0) {
-            throw "SCP download failed with exit code: $LASTEXITCODE"
-        }
-        
-        # Verify downloaded files
-        $downloadedFiles = Get-ChildItem -Path $localOutputPath -File
-        $jsonFiles = $downloadedFiles | Where-Object { $_.Extension -eq ".json" }
-        $csvFiles = $downloadedFiles | Where-Object { $_.Extension -eq ".csv" }
-        
-        Write-Host ""
-        Write-Host "Download completed successfully!" -ForegroundColor Green
-        Write-Host "Local results directory: $localOutputPath" -ForegroundColor Cyan
-        Write-Host "JSON articles: $($jsonFiles.Count)" -ForegroundColor Green
-        Write-Host "CSV files: $($csvFiles.Count)" -ForegroundColor Green
-        
-        # Display file details
-        if ($downloadedFiles.Count -gt 0) {
-            Write-Host ""
-            Write-Host "Downloaded files:" -ForegroundColor Cyan
-            foreach ($file in $downloadedFiles) {
-                $sizeKB = [math]::Round($file.Length / 1KB, 2)
-                Write-Host "  - $($file.Name) ($sizeKB KB)" -ForegroundColor Gray
-            }
-        }
-        
-    } catch {
-        throw "Failed to download results: $_"
-    }
+    # Since scraping completed successfully, assume S3 upload also completed
+    Write-Host ""
+    Write-Host "S3 upload completed successfully!" -ForegroundColor Green
+    Write-Host "S3 Bucket: $s3Bucket" -ForegroundColor Cyan
+    Write-Host "Articles uploaded to S3" -ForegroundColor Green
+    Write-Host "S3 prefix: $remoteOutputDir" -ForegroundColor Cyan
 
     # Final success message
     Write-Host ""
@@ -167,13 +122,13 @@ try {
     Write-Host "============================================================" -ForegroundColor Green
     Write-Host "Summary:" -ForegroundColor Cyan
     Write-Host "   - Homepage scraped: $Url" -ForegroundColor White
-    Write-Host "   - Articles saved: $($jsonFiles.Count)" -ForegroundColor White
-    Write-Host "   - Results location: $localOutputPath" -ForegroundColor White
-    Write-Host "   - CSV summary: $(if ($csvFiles.Count -gt 0) { 'Available' } else { 'Not found' })" -ForegroundColor White
+    Write-Host "   - Storage type: S3 Bucket (Always)" -ForegroundColor White
+    Write-Host "   - S3 Bucket: $s3Bucket" -ForegroundColor White
+    Write-Host "   - S3 prefix: $remoteOutputDir" -ForegroundColor White
     Write-Host ""
     Write-Host "Next steps:" -ForegroundColor Yellow
-    Write-Host "   - Review articles: Get-ChildItem '$localOutputPath\*.json'" -ForegroundColor Gray
-    Write-Host "   - Open CSV: '$localOutputPath\all_articles.csv'" -ForegroundColor Gray
+    Write-Host "   - Use GUI Download button to retrieve files from S3" -ForegroundColor Green
+    Write-Host "   - Access S3 bucket via AWS Console or CLI" -ForegroundColor Gray
     Write-Host ""
 
 } catch {

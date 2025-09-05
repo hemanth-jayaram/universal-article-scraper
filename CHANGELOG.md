@@ -1,5 +1,37 @@
 # Changelog
 
+## [v2.1.0] - 2025-09-05 - S3 Cloud Integration
+
+### ✨ Major Features Added
+- **S3 Cloud Storage**: Direct upload to AWS S3 buckets with automatic timestamp organization
+- **Download Manager**: One-click download from S3 to local machine via GUI
+- **Remote Execution**: Enhanced support for EC2 instances with S3 integration
+- **Credential Management**: Support for IAM roles, AWS CLI profiles, and access keys
+
+### 🔧 Improvements
+- **Updated GUI**: Added S3 download functionality with progress tracking
+- **Enhanced Error Handling**: Better error messages for S3 credential issues
+- **Documentation**: Complete S3 setup guide and troubleshooting
+- **Dependencies**: Added boto3 and botocore for AWS integration
+
+### 🐛 Bug Fixes
+- **Unicode Encoding**: Fixed GUI Unicode errors in S3 download process
+- **Credential Conflicts**: Resolved issues with IAM roles vs environment variables
+- **Path Resolution**: Fixed virtual environment detection for GUI operations
+
+### 📁 File Changes
+- **Added**: `scraper/s3_upload.py` - S3 upload utilities
+- **Added**: `download_from_s3.py` - Standalone S3 download script
+- **Added**: `test_s3_config.py` - S3 configuration testing
+- **Added**: `s3_config.example.env` - S3 configuration template
+- **Updated**: `requirements.txt` - Added boto3==1.40.24
+- **Updated**: `scraper_gui.py` - S3 download integration
+- **Updated**: `README.md` - Complete S3 documentation
+
+---
+
+# Previous Changelog
+
 All notable changes to the Homepage Article Scraper project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),

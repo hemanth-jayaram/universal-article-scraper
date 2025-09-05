@@ -14,11 +14,33 @@ from scrapy.http import Response
 from scraper.link_filters import suggest_article_links
 from scraper.extractors import extract_article
 from scraper.summarizer import summarize
-from scraper.save import write_json_per_article, ensure_output_dir
+from scraper.save import write_json_per_article, ensure_output_dir, finalize_s3_csv_upload, create_summary_report
+try:
+    from scraper.s3_upload import get_s3_uploader, is_s3_configured
+    S3_AVAILABLE = True
+except ImportError:
+    S3_AVAILABLE = False
 
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Load environment variables from .env file if available
+try:
+    import sys
+    import os
+    # Add project root to path for importing load_env
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+    
+    from load_env import load_env_file
+    load_env_file()
+    logger.debug("Environment variables loaded from .env file")
+except ImportError:
+    logger.debug("load_env module not available, using system environment variables only")
+except Exception as e:
+    logger.debug(f"Could not load .env file: {e}")
 
 
 class HomepageSpider(scrapy.Spider):
@@ -170,12 +192,31 @@ class HomepageSpider(scrapy.Spider):
         else:
             logger.warning("⚠️ No articles were scraped successfully")
         
+        # Create summary report
+        try:
+            use_s3 = S3_AVAILABLE and is_s3_configured()
+            summary_location = create_summary_report(
+                output_dir=self.out_dir,
+                homepage_url=self.start_urls[0],
+                total_found=self.articles_found,
+                processed=self.articles_processed,
+                saved=self.articles_saved,
+                elapsed_time=elapsed_time,
+                use_s3=use_s3
+            )
+            if summary_location:
+                storage_type = "S3" if use_s3 else "local file"
+                logger.info(f"📋 Summary report created ({storage_type}): {summary_location}")
+        except Exception as e:
+            logger.error(f"Failed to create summary report: {e}")
+        
         logger.info("=" * 60)
         logger.info("FINAL RESULTS")
         logger.info("=" * 60)
         logger.info(f"Articles scraped: {len(self.scraped_articles)}")
         logger.info(f"Articles filtered: {len(self.filtered_articles)}")
         logger.info(f"Articles saved: {self.articles_saved}")
+        logger.info(f"Storage type: {'S3 bucket' if S3_AVAILABLE and is_s3_configured() else 'Local filesystem'}")
         logger.info(f"Total time: {elapsed_time:.2f} seconds")
         logger.info("=" * 60)
     
@@ -261,18 +302,48 @@ class HomepageSpider(scrapy.Spider):
         """Save only the filtered articles."""
         logger.info(f"💾 Saving {len(self.filtered_articles)} filtered articles...")
         
+        # Always use S3 upload - force S3 usage
+        use_s3 = True
+        if not S3_AVAILABLE:
+            logger.error("❌ S3 module not available")
+            raise Exception("S3 module not available")
+        
+        if not is_s3_configured():
+            logger.error("❌ S3 is not configured but required for this scraper")
+            logger.error("   Please configure S3 settings in .env file")
+            raise Exception("S3 configuration required but not found")
+        
+        logger.info("🚀 Using S3 upload for articles")
+        
         for article_data in self.filtered_articles:
             try:
-                success = write_json_per_article(article_data, self.out_dir)
+                success = write_json_per_article(article_data, self.out_dir, use_s3=use_s3)
                 if success:
                     self.articles_saved += 1
-                    logger.debug(f"💾 Saved: {article_data.get('title', 'Untitled')}")
+                    storage_type = "S3" if use_s3 else "locally"
+                    logger.debug(f"💾 Saved {storage_type}: {article_data.get('title', 'Untitled')}")
                 else:
                     logger.error(f"❌ Failed to save: {article_data.get('title', 'Untitled')}")
             except Exception as e:
                 logger.error(f"Error saving article {article_data.get('title', 'Untitled')}: {e}")
         
-        logger.info(f"💾 Saving complete: {self.articles_saved} articles saved successfully")
+        # Finalize S3 CSV upload if using S3
+        if use_s3 and S3_AVAILABLE:
+            try:
+                uploader = get_s3_uploader(prefix=self.out_dir)
+                if uploader:
+                    csv_success = finalize_s3_csv_upload(uploader)
+                    if csv_success:
+                        logger.info("📊 CSV file uploaded to S3 successfully")
+                    else:
+                        logger.error("❌ Failed to upload CSV to S3")
+                else:
+                    logger.error("❌ S3 uploader not available for CSV upload")
+            except Exception as e:
+                logger.error(f"Error uploading CSV to S3: {e}")
+        
+        storage_location = f"S3 bucket ({self.out_dir})" if use_s3 else f"local directory ({self.out_dir})"
+        logger.info(f"💾 Saving complete: {self.articles_saved} articles saved to {storage_location}")
     
     def _fallback_summary(self, content: str, max_sentences: int = 3) -> str:
         """

@@ -1,6 +1,6 @@
 # Homepage Article Scraper
 
-A fast, reliable scraper that fetches homepage articles and generates local BERT/BART summaries.
+A fast, reliable scraper that fetches homepage articles and generates local BERT/BART summaries with **S3 cloud storage integration**.
 
 ## Features
 
@@ -8,8 +8,9 @@ A fast, reliable scraper that fetches homepage articles and generates local BERT
 - **Smart article detection**: Heuristic filtering to identify article links
 - **Robust content extraction**: trafilatura with BeautifulSoup fallback
 - **Local summarization**: Uses sshleifer/distilbart-cnn-12-6 (no external APIs)
-- **Dual interface**: CLI and local FastAPI web UI
-- **Structured output**: Individual JSON files + combined CSV
+- **Multiple interfaces**: CLI, Desktop GUI, and local FastAPI web UI
+- **Cloud storage**: Direct S3 upload with automatic download functionality
+- **Structured output**: Individual JSON files + combined CSV + summary reports
 
 ## Quick Setup (Amazon Linux 2023)
 
@@ -25,6 +26,20 @@ pip install -r requirements.txt
 
 ## Usage
 
+### Desktop GUI (Recommended)
+
+Launch the user-friendly desktop interface:
+```bash
+python scraper_gui.py
+```
+
+Features:
+- **Easy scraping**: Paste URL and click "Start Scraping"
+- **Remote execution**: Run scraper on EC2 instances
+- **S3 integration**: Automatic upload to AWS S3 bucket
+- **Download manager**: One-click download from S3 to local machine
+- **Real-time monitoring**: Live progress updates and logs
+
 ### CLI Interface
 
 ```bash
@@ -32,37 +47,65 @@ source venv/bin/activate
 python run.py "https://www.bbc.com/news" --out output
 ```
 
-### Web UI Interface
+### Remote Execution
 
+For running on AWS EC2 instances:
 ```bash
-source venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-Then open `http://<EC2_PUBLIC_IP>:8000/` in your browser.
-
-**Note**: Ensure your EC2 security group allows port 8000, or use SSH tunnel:
-```bash
-ssh -L 8000:localhost:8000 -i your-key.pem ec2-user@<EC2_PUBLIC_IP>
+# Remote scraping with S3 upload
+.\scripts\run_remote_simple.ps1 -Ip "YOUR_EC2_IP" -Key "path\to\key.pem" -Url "https://example.com"
 ```
 
 ## Configuration
 
-Environment variables (optional):
-- `CONCURRENT_REQUESTS` (default: 32)
-- `CONCURRENT_REQUESTS_PER_DOMAIN` (default: 16)
-- `DOWNLOAD_DELAY` (default: 0)
-- `MAX_ARTICLES` (default: 40)
-- `SUMMARY_ENABLED` (default: true)
+### Environment Variables (`.env` file)
+
+```bash
+# S3 Configuration
+S3_UPLOAD_ENABLED=true
+S3_BUCKET_NAME=your-bucket-name
+AWS_REGION=us-east-1
+
+# AWS Credentials (optional - can use IAM roles)
+# AWS_ACCESS_KEY_ID=your-access-key
+# AWS_SECRET_ACCESS_KEY=your-secret-key
+
+# Scraping Settings
+CONCURRENT_REQUESTS=32
+CONCURRENT_REQUESTS_PER_DOMAIN=16
+DOWNLOAD_DELAY=0
+MAX_ARTICLES=40
+SUMMARY_ENABLED=true
+```
+
+### S3 Setup
+
+1. **Create S3 bucket** in AWS Console
+2. **Configure credentials** (IAM roles recommended for EC2)
+3. **Copy configuration**: `cp s3_config.example.env .env`
+4. **Edit `.env`** with your bucket name and credentials
+5. **Test configuration**: `python test_s3_config.py`
 
 ## Output Structure
 
+### Local Storage
 ```
-output/
+results/
 ├── article-title-1.json
 ├── article-title-2.json
 ├── ...
-└── all_articles.csv
+├── all_articles.csv
+└── scrape_summary.json
+```
+
+### S3 Storage
+```
+s3://your-bucket/
+└── articles/YYYYMMDD_HHMMSS/
+    ├── article-title-1.json
+    ├── article-title-2.json
+    ├── ...
+    ├── all_articles.csv
+    └── scrape_summary.json
 ```
 
 Each JSON file contains:
@@ -87,6 +130,40 @@ Each JSON file contains:
 
 ## Troubleshooting
 
-- If memory is tight on t2.micro, set `SUMMARY_ENABLED=false`
-- For rate limiting issues, increase `DOWNLOAD_DELAY`
-- Check logs for specific extraction failures
+### Common Issues
+
+- **Memory issues on t2.micro**: Set `SUMMARY_ENABLED=false`
+- **Rate limiting**: Increase `DOWNLOAD_DELAY`
+- **S3 upload failures**: Check AWS credentials and bucket permissions
+- **Download not working**: Ensure boto3 is installed: `pip install boto3`
+- **GUI Unicode errors**: Fixed in latest version - restart application
+
+### S3 Permissions Required
+
+Your AWS credentials need these S3 permissions:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:PutObjectAcl",
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::your-bucket-name",
+        "arn:aws:s3:::your-bucket-name/*"
+      ]
+    }
+  ]
+}
+```
+
+### Support Files
+
+- `S3_SETUP.md`: Detailed S3 configuration guide
+- `GUI_USER_GUIDE.md`: Complete GUI usage instructions
+- `test_s3_config.py`: S3 configuration testing tool

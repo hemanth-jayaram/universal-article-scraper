@@ -18,7 +18,13 @@
 - 🤖 **Configurable summaries** - 60-160 words, customizable length
 - 🤖 **Fallback system** - Graceful degradation if AI fails
 
-### **3. High-Performance Scraping**
+### **3. Cloud Storage Integration**
+- ☁️ **S3 Auto-Upload** - Direct upload to AWS S3 buckets with timestamp organization
+- ☁️ **Remote Execution** - Run scraper on EC2, upload to S3, download to local machine
+- ☁️ **Download Manager** - One-click download from S3 with progress tracking
+- ☁️ **Credential Management** - Supports IAM roles, access keys, and AWS CLI profiles
+
+### **4. High-Performance Scraping**
 - ⚡ **Blazing fast** - Up to 32 concurrent requests, 10-20 articles/minute
 - ⚡ **Optimized settings** - Scrapy framework with production-grade configuration
 - ⚡ **Smart throttling** - Respectful rate limiting and domain-specific controls
@@ -37,9 +43,10 @@ python run.py "https://www.bbc.com/news" --out results
 - Environment variable configuration
 
 ### **2. Beautiful GUI Application**
-- 🎨 **Modern interface** - Professional, user-friendly design
+- 🎨 **Modern interface** - Professional, user-friendly design with S3 integration
 - 🎨 **Real-time progress** - Live output monitoring and status updates
-- 🎨 **One-click operation** - Just enter URL and click "Start Scraping"
+- 🎨 **Remote execution** - Run scraper on EC2 instances from your desktop
+- 🎨 **S3 download manager** - One-click download from cloud storage
 - 🎨 **Built-in file explorer** - Browse and open results directly
 
 ### **3. Web API Interface** *(Available)*

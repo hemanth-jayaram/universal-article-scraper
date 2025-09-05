@@ -57,12 +57,14 @@ class ScraperGUI:
         # Progress variables
         self.scrape_progress = tk.DoubleVar()
         self.filter_progress = tk.DoubleVar()
+        self.download_progress = tk.DoubleVar()
         self.summary_progress = tk.DoubleVar()
         self.convert_progress = tk.DoubleVar()
         
         # State variables
         self.scraping = False
         self.filtering = False
+        self.downloading = False
         self.summarizing = False
         self.converting = False
         
@@ -106,7 +108,7 @@ class ScraperGUI:
         # Description
         self.description_label = ttk.Label(
             self.main_frame,
-            text="🔄 NEW FLOW: Scrape → Filter → Download | Only valid articles are downloaded",
+            text="🔄 NEW FLOW: Scrape → Filter → Save (Local/S3) | Configure S3 in .env for cloud storage",
             font=("Segoe UI", 10),
             foreground="#666666"
         )
@@ -125,11 +127,18 @@ class ScraperGUI:
         
         self.scrape_btn = ttk.Button(
             self.actions_frame,
-            text="🔍 Scrape & Filter",
+            text="🔍 Scrape & Upload to S3",
             command=self.start_scraping,
             style="Action.TButton"
         )
         
+        self.download_btn = ttk.Button(
+            self.actions_frame,
+            text="📥 Download from S3",
+            command=self.start_s3_download,
+            style="Action.TButton",
+            state='disabled'
+        )
 
         
         self.summarize_btn = ttk.Button(
@@ -218,6 +227,15 @@ class ScraperGUI:
             mode='determinate'
         )
         
+        self.download_progress_label = ttk.Label(self.progress_frame, text="Download Progress:")
+        self.download_progress_bar = ttk.Progressbar(
+            self.progress_frame,
+            variable=self.download_progress,
+            maximum=100,
+            length=300,
+            mode='determinate'
+        )
+        
         self.summary_progress_label = ttk.Label(self.progress_frame, text="Summary Progress:")
         self.summary_progress_bar = ttk.Progressbar(
             self.progress_frame,
@@ -275,8 +293,9 @@ class ScraperGUI:
         self.actions_frame.grid(row=3, column=0, sticky="ew", pady=(0, 15), padx=(0, 10))
         
         self.scrape_btn.grid(row=0, column=0, padx=(0, 10))
-        self.summarize_btn.grid(row=0, column=1, padx=(0, 10))
-        self.convert_btn.grid(row=0, column=2)
+        self.download_btn.grid(row=0, column=1, padx=(0, 10))
+        self.summarize_btn.grid(row=0, column=2, padx=(0, 10))
+        self.convert_btn.grid(row=0, column=3)
         
         # Utils section
         self.utils_frame.grid(row=3, column=1, sticky="ew", pady=(0, 15))
@@ -298,11 +317,14 @@ class ScraperGUI:
         self.filter_progress_label.grid(row=1, column=0, sticky="w", pady=(5, 0))
         self.filter_progress_bar.grid(row=1, column=1, sticky="ew", pady=(5, 0), padx=(10, 0))
         
-        self.summary_progress_label.grid(row=2, column=0, sticky="w", pady=(5, 0))
-        self.summary_progress_bar.grid(row=2, column=1, sticky="ew", pady=(5, 0), padx=(10, 0))
+        self.download_progress_label.grid(row=2, column=0, sticky="w", pady=(5, 0))
+        self.download_progress_bar.grid(row=2, column=1, sticky="ew", pady=(5, 0), padx=(10, 0))
         
-        self.convert_progress_label.grid(row=3, column=0, sticky="w", pady=(5, 0))
-        self.convert_progress_bar.grid(row=3, column=1, sticky="ew", pady=(5, 0), padx=(10, 0))
+        self.summary_progress_label.grid(row=3, column=0, sticky="w", pady=(5, 0))
+        self.summary_progress_bar.grid(row=3, column=1, sticky="ew", pady=(5, 0), padx=(10, 0))
+        
+        self.convert_progress_label.grid(row=4, column=0, sticky="w", pady=(5, 0))
+        self.convert_progress_bar.grid(row=4, column=1, sticky="ew", pady=(5, 0), padx=(10, 0))
         
         # Output section
         self.output_frame.grid(row=5, column=0, columnspan=2, sticky="nsew", pady=(0, 0))
@@ -560,7 +582,8 @@ class ScraperGUI:
                 # Ensure progress bars reach 100% on successful completion
                 self.scrape_progress.set(100)
                 self.filter_progress.set(100)
-                self.update_status("Scraping and filtering completed - Ready to summarize")
+                self.update_status("Scraping completed - Articles uploaded to S3. Ready to download or summarize")
+                self.download_btn.config(state='normal')
                 self.summarize_btn.config(state='normal')
                 self.convert_btn.config(state='normal')
             else:
@@ -574,6 +597,111 @@ class ScraperGUI:
         finally:
             self.scraping = False
             self.scrape_btn.config(state='normal')
+    
+    def start_s3_download(self):
+        """Start S3 download in background thread."""
+        if self.downloading:
+            return
+            
+        self.downloading = True
+        self.download_btn.config(state='disabled')
+        self.download_progress.set(0)
+        
+        self.update_status("Starting S3 download...")
+        self.add_output("📥 Starting S3 download...")
+        self.add_output("-" * 50)
+        
+        # Start download thread
+        thread = threading.Thread(target=self.run_s3_download, daemon=True)
+        thread.start()
+        
+    def run_s3_download(self):
+        """Run S3 download script in background."""
+        try:
+            # Use the standalone download script with correct Python path
+            project_root = os.getcwd()
+            python_exe = os.path.join(project_root, "venv", "Scripts", "python.exe")
+            
+            # Verify the virtual environment Python exists and has boto3
+            if os.path.exists(python_exe):
+                self.output_queue.put(f"Using venv Python: {python_exe}")
+            else:
+                python_exe = sys.executable  # Fallback to current Python
+                self.output_queue.put(f"Using system Python: {python_exe}")
+            
+            download_script = os.path.join(project_root, "download_from_s3.py")
+            cmd = [python_exe, download_script]
+            
+            self.output_queue.put(f"💻 Running S3 download...")
+            self.output_queue.put(f"Command: {' '.join(cmd)}")
+            
+            # Run process and capture output with unbuffered mode
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                universal_newlines=True,
+                bufsize=1,  # Line buffered
+                cwd=os.getcwd(),
+                env=dict(os.environ, PYTHONUNBUFFERED='1')
+            )
+            
+            files_downloaded = 0
+            total_files = 0
+            
+            # Monitor output
+            for line in iter(process.stdout.readline, ''):
+                if line.strip():
+                    self.output_queue.put(line.strip())
+                    
+                    # Update progress based on output
+                    if "Connecting to S3" in line:
+                        self.download_progress.set(10)
+                        self.update_status("Connecting to S3...")
+                        
+                    elif "Finding available scraping sessions" in line:
+                        self.download_progress.set(20)
+                        self.update_status("Finding sessions...")
+                        
+                    elif "Found" in line and "files to download" in line:
+                        import re
+                        match = re.search(r'Found (\d+) files to download', line)
+                        if match:
+                            total_files = int(match.group(1))
+                            self.download_progress.set(30)
+                            self.update_status(f"Found {total_files} files to download")
+                            
+                    elif "Downloaded:" in line:
+                        files_downloaded += 1
+                        if total_files > 0:
+                            progress = 30 + min((files_downloaded / total_files) * 60, 60)
+                            self.download_progress.set(progress)
+                            self.update_status(f"Downloaded {files_downloaded}/{total_files} files")
+                            
+                    elif "S3 download completed" in line:
+                        self.download_progress.set(100)
+                        self.update_status("S3 download completed")
+            
+            process.wait()
+            
+            if process.returncode == 0:
+                self.output_queue.put("✅ S3 download completed successfully!")
+                self.download_progress.set(100)
+                self.update_status("S3 download completed - Files ready for processing")
+            else:
+                self.output_queue.put("❌ S3 download failed!")
+                self.update_status("S3 download failed")
+                
+        except Exception as e:
+            self.output_queue.put(f"❌ Error: {str(e)}")
+            self.update_status("S3 download error")
+            
+        finally:
+            self.downloading = False
+            self.download_btn.config(state='normal')
             
     def start_filtering(self):
         """Start filtering in background thread - for manual filtering of already-downloaded files."""

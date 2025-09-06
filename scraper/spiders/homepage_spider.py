@@ -18,8 +18,22 @@ from scraper.save import write_json_per_article, ensure_output_dir, finalize_s3_
 try:
     from scraper.s3_upload import get_s3_uploader, is_s3_configured
     S3_AVAILABLE = True
+    # Try to import ultra-fast uploader
+    try:
+        import sys
+        import os
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        from ultra_fast_s3_upload import create_ultra_fast_uploader
+        ULTRA_FAST_S3_AVAILABLE = True
+        print("✅ Ultra-fast S3 uploader available")
+    except ImportError:
+        ULTRA_FAST_S3_AVAILABLE = False
+        print("⚠️ Ultra-fast S3 uploader not available, using standard")
 except ImportError:
     S3_AVAILABLE = False
+    ULTRA_FAST_S3_AVAILABLE = False
 
 import logging
 
@@ -313,34 +327,71 @@ class HomepageSpider(scrapy.Spider):
             logger.error("   Please configure S3 settings in .env file")
             raise Exception("S3 configuration required but not found")
         
-        logger.info("🚀 Using S3 upload for articles")
-        
+        # Use ULTRA-FAST upload method if available
+        if ULTRA_FAST_S3_AVAILABLE and len(self.filtered_articles) > 2:
+            logger.info("🚀 Using ULTRA-FAST S3 batch upload (MAXIMUM SPEED)")
+            try:
+                uploader = create_ultra_fast_uploader(prefix=self.out_dir)
+                self.articles_saved = uploader.upload_articles_batch(
+                    self.filtered_articles, 
+                    max_workers=8  # Optimized for speed
+                )
+                
+                # Upload CSV with optimized method
+                if self.articles_saved > 0:
+                    try:
+                        # Generate CSV content quickly
+                        csv_rows = []
+                        headers = ["title", "url", "content", "summary", "author"]
+                        csv_rows.append(",".join(f'"{h}"' for h in headers))
+                        
+                        for article in self.filtered_articles[:self.articles_saved]:
+                            row = [
+                                article.get('title', '').replace('"', '""'),
+                                article.get('url', ''),
+                                article.get('content', '')[:500].replace('"', '""'),  # Truncate content
+                                article.get('summary', '').replace('"', '""'),
+                                article.get('author', '').replace('"', '""')
+                            ]
+                            csv_rows.append(",".join(f'"{cell}"' for cell in row))
+                        
+                        csv_content = "\n".join(csv_rows)
+                        uploader.upload_csv_optimized(csv_content)
+                        logger.info("📊 CSV uploaded with ultra-fast method")
+                        
+                    except Exception as e:
+                        logger.error(f"Ultra-fast CSV upload failed: {e}")
+                
+            except Exception as e:
+                logger.error(f"Ultra-fast upload failed: {e}, falling back to standard method")
+                self._save_articles_standard_method()
+        else:
+            # Fallback to standard method for small batches or if ultra-fast not available
+            logger.info("🚀 Using standard S3 upload")
+            self._save_articles_standard_method()
+    
+    def _save_articles_standard_method(self) -> None:
+        """Fallback standard S3 upload method."""
         for article_data in self.filtered_articles:
             try:
-                success = write_json_per_article(article_data, self.out_dir, use_s3=use_s3)
+                success = write_json_per_article(article_data, self.out_dir, use_s3=True)
                 if success:
                     self.articles_saved += 1
-                    storage_type = "S3" if use_s3 else "locally"
-                    logger.debug(f"💾 Saved {storage_type}: {article_data.get('title', 'Untitled')}")
+                    logger.debug(f"💾 Saved to S3: {article_data.get('title', 'Untitled')}")
                 else:
                     logger.error(f"❌ Failed to save: {article_data.get('title', 'Untitled')}")
             except Exception as e:
                 logger.error(f"Error saving article {article_data.get('title', 'Untitled')}: {e}")
         
-        # Finalize S3 CSV upload if using S3
-        if use_s3 and S3_AVAILABLE:
-            try:
-                uploader = get_s3_uploader(prefix=self.out_dir)
-                if uploader:
-                    csv_success = finalize_s3_csv_upload(uploader)
-                    if csv_success:
-                        logger.info("📊 CSV file uploaded to S3 successfully")
-                    else:
-                        logger.error("❌ Failed to upload CSV to S3")
-                else:
-                    logger.error("❌ S3 uploader not available for CSV upload")
-            except Exception as e:
-                logger.error(f"Error uploading CSV to S3: {e}")
+        # Upload CSV with standard method
+        try:
+            uploader = get_s3_uploader(prefix=self.out_dir)
+            if uploader:
+                csv_success = finalize_s3_csv_upload(uploader)
+                if csv_success:
+                    logger.info("📊 CSV file uploaded to S3 successfully")
+        except Exception as e:
+            logger.error(f"Error uploading CSV to S3: {e}")
         
         storage_location = f"S3 bucket ({self.out_dir})" if use_s3 else f"local directory ({self.out_dir})"
         logger.info(f"💾 Saving complete: {self.articles_saved} articles saved to {storage_location}")
